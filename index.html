@@ -104,6 +104,7 @@ body{font-family:var(--body);padding-left:max(16px,env(safe-area-inset-left,0px)
 .step.on em{color:var(--gold)}
 #sV video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
 .vstart{position:absolute;left:50%;bottom:70px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;padding:22px 40px;background:rgba(7,4,15,.72);border:2px solid var(--magenta);box-shadow:0 0 30px rgba(255,61,220,.6);font-family:var(--mono);font-weight:700;font-size:30px;letter-spacing:.2em;text-transform:uppercase;color:#fff;z-index:5}
+.vstart .bar{position:absolute;left:0;bottom:0;height:4px;background:var(--magenta);width:0;transition:width .2s}
 .vstart b{display:inline-flex;width:56px;height:56px;border-radius:50%;background:var(--magenta);color:var(--ink);align-items:center;justify-content:center;font-size:26px;letter-spacing:0}
 .tagline{position:absolute;left:0;right:0;top:860px;text-align:center;font-family:var(--display);font-size:92px;text-transform:uppercase;color:var(--gold);text-shadow:0 0 50px rgba(255,194,61,.5)}
 .box{position:absolute}
@@ -256,7 +257,7 @@ body{font-family:var(--body);padding-left:max(16px,env(safe-area-inset-left,0px)
       <!-- SV TEASER -->
       <section class="scene" id="sV">
         <video id="teaser" data-src="baba-box-teaser.mp4" data-src-m="baba-box-teaser-m.mp4" poster="teaser-poster.jpg" playsinline preload="auto"></video>
-        <div class="vstart" id="vstart"><b>▶</b>Press Next to start</div>
+        <div class="vstart" id="vstart"><b>▶</b><span id="vlab">Press Next to start</span></div>
       </section>
 
       <!-- S1 OPEN -->
@@ -513,6 +514,19 @@ const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelect
 const stage=$('#stage'), wrap=$('#wrap');
 const LITE=matchMedia('(pointer:coarse)').matches||Math.min(screen.width,screen.height)<820||((navigator.deviceMemory||8)<=4);
 $$('video[data-src]').forEach(v=>{v.src=LITE?v.dataset.srcM:v.dataset.src;});
+/* Download a video completely, then play it from memory, so playback never
+   waits on the network. Falls back to normal streaming if the download fails. */
+function prefetch(v,onProgress){
+  const url=v.getAttribute('src');
+  return fetch(url).then(async r=>{
+    if(!r.ok||!r.body)throw new Error('fetch');
+    const total=+r.headers.get('content-length')||0, rd=r.body.getReader(), parts=[];let got=0;
+    for(;;){const {done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;if(total&&onProgress)onProgress(got/total);}
+    const blob=new Blob(parts,{type:'video/mp4'});
+    v.dataset.blob=URL.createObjectURL(blob);
+    return v.dataset.blob;
+  });
+}
 if(LITE){document.documentElement.classList.add('lite');$$('#stage [filter]').forEach(e=>e.removeAttribute('filter'));$$('#stage [style*="filter"]').forEach(e=>{e.style.filter='none';});}
 
 /* ---------- scale stage ----------
@@ -902,6 +916,19 @@ const vid=$('#teaser'), vstart=$('#vstart'), soundBtn=$('#sound');
 function updSound(){soundBtn.textContent=vid.muted?'Sound: off':'Sound: on';soundBtn.setAttribute('aria-pressed',!vid.muted);const o=document.getElementById('oSound');if(o)o.textContent=vid.muted?'Sound off':'Sound on';}
 soundBtn.addEventListener('click',()=>{vid.muted=!vid.muted;updSound();});
 function begin(){if(!started){started=true;vstart.hidden=true;}}
+const vlab=$('#vlab'), vbar=document.createElement('i');vbar.className='bar';vstart.appendChild(vbar);
+let teaserReady=false, pendingStart=false;
+function setLoad(p){vbar.style.width=Math.round(p*100)+'%';if(pendingStart)vlab.textContent='Loading '+Math.round(p*100)+'%';}
+function useBlob(v){if(v.dataset.blob&&v.src!==v.dataset.blob){const m=v.muted;v.src=v.dataset.blob;v.muted=m;v.load();}}
+function teaserDone(){
+  teaserReady=true;vbar.style.width='100%';
+  if(!started||tl.time()<.05)useBlob(vid);
+  vlab.textContent='Press Next to start';
+  if(pendingStart){pendingStart=false;next();}
+  // then fetch the demo in the background
+  prefetch(demo).then(()=>{if(demo.paused)useBlob(demo);}).catch(()=>{});
+}
+prefetch(vid,setLoad).then(teaserDone).catch(()=>{teaserDone();});
 /* Video playback: the video is the clock. The timeline follows it, and waits
    for it while it buffers, instead of forcing the video to seek (which caused
    repeated stalls on slower connections). */
@@ -939,7 +966,7 @@ function follow(){
 gsap.ticker.add(follow);
 VIDS.forEach(o=>o.v.addEventListener('waiting',follow));
 function syncVideo(){
-  if(demo.preload==='none'&&demoCi>0&&tl.time()>=chapters[demoCi-1].t-1){demo.preload='auto';demo.load();}
+  if(demo.preload==='none'&&!demo.dataset.blob&&demoCi>0&&tl.time()>=chapters[demoCi-1].t-1){demo.preload='auto';demo.load();}
   syncOne(vid,0,0,VDUR,true);syncOne(demo,demoCi,ROFF,RDUR,false);
 }
 chapters.forEach((c,i)=>{
@@ -974,6 +1001,7 @@ function goScene(i){
   tl.play();ui();
 }
 function next(){
+  if(!started&&!teaserReady){pendingStart=true;vlab.textContent='Loading…';try{const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{});vid.pause();}catch(e){}return;}
   if(!started){begin();idx=0;if(reduce){tl.seek(chapters[0].hold);ui();return;}stopAt=chapters[0].hold;tl.play();ui();return;}
   if(auto){goScene(sceneAt(tl.time())+1);return;}
   if((!tl.paused()||held)&&stopAt!==null){release();const s=stopAt;stopAt=null;tl.pause();tl.seek(s);ui();return;} // finish current scene instantly
