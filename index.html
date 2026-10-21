@@ -255,7 +255,7 @@ body{font-family:var(--body);padding-left:max(16px,env(safe-area-inset-left,0px)
 
       <!-- SV TEASER -->
       <section class="scene" id="sV">
-        <video id="teaser" src="baba-box-teaser.mp4" poster="teaser-poster.jpg" playsinline preload="metadata"></video>
+        <video id="teaser" src="baba-box-teaser.mp4" poster="teaser-poster.jpg" playsinline preload="auto"></video>
         <div class="vstart" id="vstart"><b>▶</b>Press Next to start</div>
       </section>
 
@@ -901,16 +901,42 @@ const vid=$('#teaser'), vstart=$('#vstart'), soundBtn=$('#sound');
 function updSound(){soundBtn.textContent=vid.muted?'Sound: off':'Sound: on';soundBtn.setAttribute('aria-pressed',!vid.muted);const o=document.getElementById('oSound');if(o)o.textContent=vid.muted?'Sound off':'Sound on';}
 soundBtn.addEventListener('click',()=>{vid.muted=!vid.muted;updSound();});
 function begin(){if(!started){started=true;vstart.hidden=true;}}
+/* Video playback: the video is the clock. The timeline follows it, and waits
+   for it while it buffers, instead of forcing the video to seek (which caused
+   repeated stalls on slower connections). */
+let held=null;
+function release(){held=null;}
 function syncOne(v,ci,off,dur,canSound){
   if(ci<0)return;
   const local=tl.time()-(chapters[ci].t+off);
   if(local<-off||local>dur+.6){if(!v.paused)v.pause();return;}
   const target=Math.min(Math.max(0,local),Math.max(0,(v.duration||dur)-.04));
-  if(tl.paused()||local<0){if(!v.paused)v.pause();if(v.readyState>0&&Math.abs(v.currentTime-target)>.06)v.currentTime=target;return;}
-  if(v.readyState>0&&Math.abs(v.currentTime-target)>.35)v.currentTime=target;
-  if(v.paused&&local<dur-.05){const pr=v.play();if(pr&&pr.catch)pr.catch(()=>{if(canSound){v.muted=true;updSound();}v.play().catch(()=>{});});}
+  if((tl.paused()&&held!==v)||local<0){if(!v.paused)v.pause();if(v.readyState>0&&Math.abs(v.currentTime-target)>.06)v.currentTime=target;return;}
+  if(v.paused&&!v.ended&&local<dur-.05){
+    if(v.readyState>0&&Math.abs(v.currentTime-target)>.3)v.currentTime=target;
+    const pr=v.play();if(pr&&pr.catch)pr.catch(()=>{if(canSound){v.muted=true;updSound();}v.play().catch(()=>{});});
+  }
 }
 const demo=$('#demo'), demoCi=chapters.findIndex(c=>c.name==='Live reveal');
+const VIDS=[{v:vid,ci:0,off:0,dur:VDUR},{v:demo,ci:demoCi,off:ROFF,dur:RDUR}];
+function follow(){
+  for(const o of VIDS){
+    if(o.ci<0)continue;
+    const base=chapters[o.ci].t+o.off, local=tl.time()-base, v=o.v;
+    if(held===v){
+      if(v.paused&&!v.ended){v.play().catch(()=>{});}
+      if(!v.paused&&v.readyState>=3&&v.currentTime>o.ht+.03){held=null;tl.time(base+v.currentTime);tl.play();}
+      continue;
+    }
+    if(tl.paused()||v.paused||v.ended||local<0||local>o.dur-.15)continue;
+    if(v.readyState<3||v.currentTime<local-.1){                 // buffering or not started: wait for it
+      held=v;o.ht=v.currentTime;tl.pause();tl.time(base+v.currentTime,true);continue;
+    }
+    if(Math.abs(v.currentTime-local)>.12)tl.time(base+v.currentTime); // small drift: follow the video
+  }
+}
+gsap.ticker.add(follow);
+VIDS.forEach(o=>o.v.addEventListener('waiting',follow));
 function syncVideo(){
   if(demo.preload==='none'&&demoCi>0&&tl.time()>=chapters[demoCi-1].t-1){demo.preload='auto';demo.load();}
   syncOne(vid,0,0,VDUR,true);syncOne(demo,demoCi,ROFF,RDUR,false);
@@ -939,7 +965,7 @@ tl.eventCallback('onUpdate',()=>{
 });
 tl.eventCallback('onComplete',()=>{if(auto){auto=false;}ui();});
 function goScene(i){
-  begin();idx=Math.max(0,Math.min(chapters.length-1,i));
+  release();begin();idx=Math.max(0,Math.min(chapters.length-1,i));
   if(reduce){stopAt=null;tl.pause();tl.seek(chapters[idx].hold);ui();return;}
   tl.seek(chapters[idx].t);
   stopAt=auto?null:chapters[idx].hold;
@@ -948,7 +974,7 @@ function goScene(i){
 function next(){
   if(!started){begin();idx=0;if(reduce){tl.seek(chapters[0].hold);ui();return;}stopAt=chapters[0].hold;tl.play();ui();return;}
   if(auto){goScene(sceneAt(tl.time())+1);return;}
-  if(!tl.paused()&&stopAt!==null){const s=stopAt;stopAt=null;tl.pause();tl.seek(s);ui();return;} // finish current scene instantly
+  if((!tl.paused()||held)&&stopAt!==null){release();const s=stopAt;stopAt=null;tl.pause();tl.seek(s);ui();return;} // finish current scene instantly
   if(idx>=chapters.length-1)return;
   idx++;
   if(reduce){tl.seek(chapters[idx].hold);ui();return;}
@@ -959,13 +985,13 @@ $('#next').addEventListener('click',next);
 $('#prev').addEventListener('click',prev);
 $('#replay').addEventListener('click',()=>goScene(auto?sceneAt(tl.time()):idx));
 playBtn.addEventListener('click',()=>{
-  begin();auto=!auto;
+  release();begin();auto=!auto;
   if(auto){stopAt=null;if(tl.progress()>=1)tl.seek(0);if(!reduce)tl.play();}
   else{tl.pause();idx=sceneAt(tl.time());}
   ui();
 });
 $('#stage').addEventListener('click',e=>{if(auto)return;const r=stage.getBoundingClientRect();if(started&&e.clientX<r.left+r.width*.28)prev();else next();});
-function seekFromEvent(e){const r=track.getBoundingClientRect();const p=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width));stopAt=null;if(!auto)tl.pause();tl.seek(p*total);idx=sceneAt(tl.time());ui();}
+function seekFromEvent(e){release();const r=track.getBoundingClientRect();const p=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width));stopAt=null;if(!auto)tl.pause();tl.seek(p*total);idx=sceneAt(tl.time());ui();}
 let drag=false;
 track.addEventListener('pointerdown',e=>{drag=true;track.setPointerCapture(e.pointerId);seekFromEvent(e);});
 track.addEventListener('pointermove',e=>{if(drag)seekFromEvent(e);});
