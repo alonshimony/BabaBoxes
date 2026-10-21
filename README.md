@@ -10,6 +10,7 @@ A static site with no build step: `index.html` plus two videos and three images.
 |---|---|
 | `index.html` | The film: 14 scenes, presenter controls, phone layouts |
 | `baba-box-teaser.mp4`, `teaser-poster.jpg` | Opening BABA BOX teaser (scene 1) |
+| `baba-box-teaser-m.mp4`, `box-demo-m.mp4` | Lighter versions served to phones and tablets |
 | `box-demo.mp4`, `demo-poster.jpg` | Live box-opening demo (scene 4) |
 | `lobby.jpg` | Baba Boxes lobby screenshot (scene 3) |
 

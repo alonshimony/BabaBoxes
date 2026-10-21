@@ -255,7 +255,7 @@ body{font-family:var(--body);padding-left:max(16px,env(safe-area-inset-left,0px)
 
       <!-- SV TEASER -->
       <section class="scene" id="sV">
-        <video id="teaser" src="baba-box-teaser.mp4" poster="teaser-poster.jpg" playsinline preload="auto"></video>
+        <video id="teaser" data-src="baba-box-teaser.mp4" data-src-m="baba-box-teaser-m.mp4" poster="teaser-poster.jpg" playsinline preload="auto"></video>
         <div class="vstart" id="vstart"><b>▶</b>Press Next to start</div>
       </section>
 
@@ -309,7 +309,7 @@ body{font-family:var(--body);padding-left:max(16px,env(safe-area-inset-left,0px)
       <section class="scene" id="sD">
         <div class="abs kicker" style="left:120px;top:110px">Live demo · The Crown Room</div>
         <h2 class="abs disp" style="left:120px;top:160px;font-size:86px;width:1700px">Open. <span class="grad">Reveal.</span> <span class="goldtxt">Win.</span></h2>
-        <div class="frame" id="demoFrame"><video id="demo" src="box-demo.mp4" poster="demo-poster.jpg" muted playsinline preload="none"></video><div class="live"><i></i>LIVE BUILD</div></div>
+        <div class="frame" id="demoFrame"><video id="demo" data-src="box-demo.mp4" data-src-m="box-demo-m.mp4" poster="demo-poster.jpg" muted playsinline preload="none"></video><div class="live"><i></i>LIVE BUILD</div></div>
         <div class="side" id="steps">
           <div class="step"><em>01</em><div><b>Pick a box</b><span>Jewelry · min 55, max 2,970</span></div></div>
           <div class="step"><em>02</em><div><b>See every item</b><span>Values shown before opening</span></div></div>
@@ -512,6 +512,7 @@ body{font-family:var(--body);padding-left:max(16px,env(safe-area-inset-left,0px)
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const stage=$('#stage'), wrap=$('#wrap');
 const LITE=matchMedia('(pointer:coarse)').matches||Math.min(screen.width,screen.height)<820||((navigator.deviceMemory||8)<=4);
+$$('video[data-src]').forEach(v=>{v.src=LITE?v.dataset.srcM:v.dataset.src;});
 if(LITE){document.documentElement.classList.add('lite');$$('#stage [filter]').forEach(e=>e.removeAttribute('filter'));$$('#stage [style*="filter"]').forEach(e=>{e.style.filter='none';});}
 
 /* ---------- scale stage ----------
@@ -932,7 +933,7 @@ function follow(){
     if(v.readyState<3||v.currentTime<local-.1){                 // buffering or not started: wait for it
       held=v;o.ht=v.currentTime;tl.pause();tl.time(base+v.currentTime,true);continue;
     }
-    if(Math.abs(v.currentTime-local)>.12)tl.time(base+v.currentTime); // small drift: follow the video
+    if(Math.abs(v.currentTime-local)>(LITE?.3:.12))tl.time(base+v.currentTime); // small drift: follow the video
   }
 }
 gsap.ticker.add(follow);
@@ -948,16 +949,17 @@ chapters.forEach((c,i)=>{
 });
 const chapBtns=$$('.chap');
 function sceneAt(t){let ci=0;chapters.forEach((c,i)=>{if(t>=c.t-0.001)ci=i;});return ci;}
+const UI={};
+function put(key,fn,val){if(UI[key]!==val){UI[key]=val;fn(val);}}
+const oNo=$('#oNo');
 function ui(){
   paintCounters();syncVideo();
-  const t=tl.time();fill.style.width=(t/total*100)+'%';time.textContent=fmt(t)+' / '+fmt(total);
-  track.setAttribute('aria-valuenow',Math.round(t/total*100));
+  const t=tl.time(), pct=Math.round(t/total*1000)/10;
+  put('fill',v=>{fill.style.width=v+'%';track.setAttribute('aria-valuenow',Math.round(v));},pct);
+  put('time',v=>{time.textContent=v;},fmt(t)+' / '+fmt(total));
   if(auto) idx=sceneAt(t);
-  chapBtns.forEach((b,i)=>b.classList.toggle('cur',i===idx));
-  sceneNo.textContent=String(idx+1).padStart(2,'0')+' / '+String(chapters.length).padStart(2,'0');
-  $('#oNo').textContent=sceneNo.textContent;
-  playBtn.textContent=auto?'Autoplay: on':'Autoplay: off';playBtn.setAttribute('aria-pressed',auto);
-  $('#prev').disabled=false;
+  put('idx',v=>{chapBtns.forEach((b,i)=>b.classList.toggle('cur',i===v));const n=String(v+1).padStart(2,'0')+' / '+String(chapters.length).padStart(2,'0');sceneNo.textContent=n;oNo.textContent=n;},idx);
+  put('auto',v=>{playBtn.textContent=v?'Autoplay: on':'Autoplay: off';playBtn.setAttribute('aria-pressed',v);},auto);
 }
 tl.eventCallback('onUpdate',()=>{
   if(stopAt!==null && tl.time()>=stopAt-1e-4){const s=stopAt;stopAt=null;tl.pause();tl.seek(s,false);}
